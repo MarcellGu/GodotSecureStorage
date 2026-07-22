@@ -20,6 +20,7 @@ case "$platform" in macos|ios|windows|linux|android) ;; *) echo "不支持的平
 case "$target" in template_debug|template_release) ;; *) echo "不支持的目标：$target" >&2; exit 1 ;; esac
 case "$arch" in arm64|x86_64|universal) ;; *) echo "不支持的架构：$arch" >&2; exit 1 ;; esac
 case "$platform" in ios|android) arch=arm64 ;; esac
+apple_bundle_version_pattern='^(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)$'
 
 "$project_dir/scripts/bootstrap.sh" >/dev/null
 deps_dir="$build_root/deps"
@@ -47,8 +48,84 @@ run_scons() {
     )
 }
 
+prepare_macos_framework() {
+    framework_name="libsecure_storage.macos.$target"
+    framework_dir="$work_dir/addons/SecureStorage/bin/macos/$framework_name.framework"
+    framework_plist="$framework_dir/Resources/Info.plist"
+    case "$target" in
+        template_debug) bundle_variant=debug ;;
+        template_release) bundle_variant=release ;;
+    esac
+    bundle_version=$(awk -F '"' '/^version[[:space:]]*=/{ print $2; exit }' "$work_dir/addon/plugin.cfg")
+    if [ -z "$bundle_version" ]; then
+        echo "无法从 plugin.cfg 读取 framework 版本。" >&2
+        exit 1
+    fi
+    apple_bundle_version=$(printf '%s\n' "$bundle_version" | sed -nE 's/^([0-9]+\.[0-9]+\.[0-9]+)([.-][0-9A-Za-z.-]+)?$/\1/p')
+    if [ -z "$apple_bundle_version" ]; then
+        echo "plugin.cfg 版本必须是三段式 SemVer：$bundle_version" >&2
+        exit 1
+    fi
+    if ! printf '%s\n' "$apple_bundle_version" | grep -Eq "$apple_bundle_version_pattern"; then
+        echo "framework 版本超出 Apple 限制（major 最多 4 位，minor/patch 最多 2 位，且不得包含前导零）：$apple_bundle_version" >&2
+        exit 1
+    fi
+
+    mkdir -p "$framework_dir/Resources"
+    plutil -create xml1 "$framework_plist"
+    plutil -insert CFBundleDevelopmentRegion -string en "$framework_plist"
+    plutil -insert CFBundleExecutable -string "$framework_name" "$framework_plist"
+    plutil -insert CFBundleIdentifier -string "com.marcellgu.securestorage.macos.$bundle_variant" "$framework_plist"
+    plutil -insert CFBundleInfoDictionaryVersion -string 6.0 "$framework_plist"
+    plutil -insert CFBundleName -string "$framework_name" "$framework_plist"
+    plutil -insert CFBundlePackageType -string FMWK "$framework_plist"
+    plutil -insert CFBundleShortVersionString -string "$apple_bundle_version" "$framework_plist"
+    plutil -insert CFBundleVersion -string "$apple_bundle_version" "$framework_plist"
+    plutil -insert CFBundleSupportedPlatforms -json '["MacOSX"]' "$framework_plist"
+    plutil -lint "$framework_plist" >/dev/null
+    codesign --force --sign - --timestamp=none "$framework_dir" >/dev/null
+}
+
+validate_macos_framework() {
+    framework_name="libsecure_storage.macos.$target"
+    framework_dir="$project_dir/addons/SecureStorage/bin/macos/$framework_name.framework"
+    framework_plist="$framework_dir/Resources/Info.plist"
+    test -f "$framework_dir/$framework_name"
+    plutil -lint "$framework_plist" >/dev/null
+    if [ "$(plutil -extract CFBundleExecutable raw -o - "$framework_plist")" != "$framework_name" ]; then
+        echo "framework 的 CFBundleExecutable 与二进制名称不一致。" >&2
+        exit 1
+    fi
+    if [ "$(plutil -extract CFBundlePackageType raw -o - "$framework_plist")" != FMWK ]; then
+        echo "framework 的 CFBundlePackageType 无效。" >&2
+        exit 1
+    fi
+    bundle_short_version=$(plutil -extract CFBundleShortVersionString raw -o - "$framework_plist")
+    bundle_build_version=$(plutil -extract CFBundleVersion raw -o - "$framework_plist")
+    if printf '%s\n%s\n' "$bundle_short_version" "$bundle_build_version" | grep -Eqv "$apple_bundle_version_pattern"; then
+        echo "framework 的版本字段不符合 Apple 分段限制。" >&2
+        exit 1
+    fi
+    if ! codesign --verify --deep --strict "$framework_dir"; then
+        echo "framework 的 ad-hoc 签名无效。" >&2
+        exit 1
+    fi
+    signature_info=$(codesign --display --verbose=4 "$framework_dir" 2>&1) || {
+        echo "framework 缺少 macOS 动态加载所需的 ad-hoc 签名。" >&2
+        exit 1
+    }
+    if ! printf '%s\n' "$signature_info" | grep -Fqx 'Signature=adhoc'; then
+        echo "framework 构建产物只能使用不含开发者身份的 ad-hoc 签名。" >&2
+        exit 1
+    fi
+}
+
 case "$platform" in
-    macos|windows|linux)
+    macos)
+        run_scons
+        prepare_macos_framework
+        ;;
+    windows|linux)
         run_scons
         ;;
     ios)
@@ -81,5 +158,14 @@ case "$platform" in
 esac
 
 mkdir -p "$project_dir/addons/SecureStorage"
+if [ "$platform" = macos ]; then
+    final_framework="$project_dir/addons/SecureStorage/bin/macos/libsecure_storage.macos.$target.framework"
+    if [ -d "$final_framework" ]; then
+        find "$final_framework" -depth -delete
+    fi
+fi
 cp -R "$work_dir/addons/SecureStorage/." "$project_dir/addons/SecureStorage/"
+if [ "$platform" = macos ]; then
+    validate_macos_framework
+fi
 printf '已生成 %s\n' "$project_dir/addons/SecureStorage"

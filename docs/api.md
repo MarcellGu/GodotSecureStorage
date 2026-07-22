@@ -6,13 +6,13 @@
 
 ```text
 is_available() -> bool
-set_value(namespace: String, key: String, value: String) -> SecureStorageResult
-get_value(namespace: String, key: String) -> SecureStorageResult
-remove_value(namespace: String, key: String) -> SecureStorageResult
-clear_namespace(namespace: String) -> SecureStorageResult
+set_value(storage_namespace: String, key: String, value: String) -> SecureStorageResult
+get_value(storage_namespace: String, key: String) -> SecureStorageResult
+remove_value(storage_namespace: String, key: String) -> SecureStorageResult
+clear_namespace(storage_namespace: String) -> SecureStorageResult
 ```
 
-`namespace` 长度为 1–128 个字符，只允许小写 ASCII 字母、数字、`.`、`-`、`_`。建议使用应用反向域名。`key` 长度为 1–512 个 Godot
+`storage_namespace` 长度为 1–128 个字符，只允许小写 ASCII 字母、数字、`.`、`-`、`_`。建议使用应用反向域名。`key` 长度为 1–512 个 Godot
 字符，不允许 NUL。`value` 的 UTF-8 编码上限为 1 MiB，可为空。
 
 `remove_value()` 删除存在键时成功且 `is_found() == true`；重复删除成功且 `is_found() == false`。`clear_namespace()`

@@ -32,6 +32,11 @@ elif [ ! -f "$work_dir/project.godot" ] || [ ! -f "$work_dir/addons/SecureStorag
     echo "找不到预编译测试项目，请先构建 $platform template_debug ${arch}。" >&2
     exit 1
 fi
+if [ "$platform" = macos ]; then
+    test_framework="$work_dir/addons/SecureStorage/bin/macos/libsecure_storage.macos.template_debug.framework"
+    codesign --force --sign - --timestamp=none "$test_framework" >/dev/null
+    codesign --verify --deep --strict "$test_framework"
+fi
 output_file=$(mktemp "${TMPDIR:-/tmp}/secure-storage-tests.XXXXXX")
 trap 'test ! -f "$output_file" || find "$output_file" -delete' EXIT INT TERM
 

@@ -40,6 +40,14 @@ if grep -R -n ':=' "$project_dir/src/addon" "$project_dir/tests"; then
     echo "发现禁止的 GDScript 类型推断。" >&2
     exit 1
 fi
+if grep -R -E -n '(^|[^[:alnum:]_])namespace[[:space:]]*:' "$project_dir/src/addon" "$project_dir/tests"; then
+    echo "GDScript 参数或变量不得使用保留字 namespace。" >&2
+    exit 1
+fi
+if grep -R -E -n 'D_METHOD\(.*"namespace"' "$project_dir/src/native"; then
+    echo "GDExtension 绑定参数不得暴露保留字 namespace。" >&2
+    exit 1
+fi
 if find "$project_dir" -type f \( -name '*.cs' -o -name '*.csproj' -o -name '*.sln' \) -print | grep .; then
     echo "发现禁止的 .NET 源文件。" >&2
     exit 1

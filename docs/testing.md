@@ -25,6 +25,8 @@ CI 在 macOS、Windows、Linux runner 上都执行 `real`。Windows 直接验证
 
 `verify.sh` 还会检查顶层仅有五个白名单目录、脚本恰好五个、文档恰好两个、源码与测试中没有生成物、没有 C#/.NET 文件。测试脚本会在全新的临时
 Godot 项目中写入确定性的 GDExtension 登记表，再直接通过 Godot headless 完成解析和测试，不依赖或生成编辑器导入缓存。
+macOS arm64 要求动态加载的 Mach-O 带有签名，因此构建产物保留不含开发者身份的 ad-hoc 签名；`test.sh` 会对外部构建根目录中的测试副本重新执行
+ad-hoc 签名以保证重复测试稳定。根目录内用于分发的 framework 也保留 ad-hoc 签名，由最终应用导出流程使用应用自己的签名身份覆盖。
 
 ## 100% 路径覆盖目标
 

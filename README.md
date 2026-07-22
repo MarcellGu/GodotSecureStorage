@@ -151,6 +151,10 @@ libsecret 开发头文件；Windows 需要 Visual Studio C++ 工具链。
 debug 与 release 构建；CI 会自动完成这一步。构建完成后运行 `./scripts/clean.sh` 清理 addon 和工作目录；如需同时清理依赖与对象缓存，运行
 `./scripts/clean.sh --all`。
 
+macOS framework 会生成 `Resources/Info.plist`；插件版本必须以 `major.minor.patch` 三段数字开头，可追加以 `-` 或 `.` 开头的后缀，
+framework 版本字段只与其三段数字核心同步。产物保留不含开发者身份的 ad-hoc 签名，确保 Apple Silicon 上的 Godot 编辑器能够直接加载。
+最终应用导出时会使用应用自己的签名身份覆盖该签名；构建会拒绝缺少关键 bundle 元数据、完全未签名或意外带有开发者身份的 framework。
+
 ## 构建后结构
 
 本地构建会出现两个生成区域：仓库根目录只保留可安装 addon，依赖、对象文件、测试工程和各工具链中间产物留在外部构建根目录。

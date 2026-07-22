@@ -180,12 +180,12 @@ BackendResult BackendResult::failure(SecureStorageError::Code p_error, const Str
 void SecureStorage::_bind_methods() {
 	ClassDB::bind_static_method("SecureStorage", D_METHOD("create_for_testing"), &SecureStorage::create_for_testing);
 	ClassDB::bind_method(D_METHOD("is_available"), &SecureStorage::is_available);
-	ClassDB::bind_method(D_METHOD("set_value", "namespace", "key", "value"), &SecureStorage::set_value);
-	ClassDB::bind_method(D_METHOD("get_value", "namespace", "key"), &SecureStorage::get_value);
-	ClassDB::bind_method(D_METHOD("remove_value", "namespace", "key"), &SecureStorage::remove_value);
-	ClassDB::bind_method(D_METHOD("clear_namespace", "namespace"), &SecureStorage::clear_namespace);
+	ClassDB::bind_method(D_METHOD("set_value", "storage_namespace", "key", "value"), &SecureStorage::set_value);
+	ClassDB::bind_method(D_METHOD("get_value", "storage_namespace", "key"), &SecureStorage::get_value);
+	ClassDB::bind_method(D_METHOD("remove_value", "storage_namespace", "key"), &SecureStorage::remove_value);
+	ClassDB::bind_method(D_METHOD("clear_namespace", "storage_namespace"), &SecureStorage::clear_namespace);
 	ClassDB::bind_method(D_METHOD("set_available_for_testing", "available"), &SecureStorage::set_available_for_testing);
-	ClassDB::bind_method(D_METHOD("corrupt_value_for_testing", "namespace", "key"), &SecureStorage::corrupt_value_for_testing);
+	ClassDB::bind_method(D_METHOD("corrupt_value_for_testing", "storage_namespace", "key"), &SecureStorage::corrupt_value_for_testing);
 }
 
 SecureStorage::SecureStorage() : SecureStorage(true) {}

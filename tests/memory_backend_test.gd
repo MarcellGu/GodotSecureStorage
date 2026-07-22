@@ -2,6 +2,7 @@ extends RefCounted
 
 const TEST_CONTEXT = preload("res://tests/test_context.gd")
 const STORAGE_CONTRACT_TEST = preload("res://tests/storage_contract_test.gd")
+const STORAGE_SERVICE = preload("res://addons/SecureStorage/storage_service.gd")
 const PRIMARY_NAMESPACE: String = "com.marcellgu.securestorage.contract_test"
 const SECONDARY_NAMESPACE: String = "com.marcellgu.securestorage.contract_other"
 const SECRET_SAMPLE: String = "sample-secret-never-log"
@@ -22,6 +23,28 @@ func run(context: TEST_CONTEXT) -> void:
 		return
 
 	context.begin_suite("内存后端故障映射")
+
+	context.begin_case("公开方法参数名")
+	var service: RefCounted = STORAGE_SERVICE.new()
+	context.check(service != null, "GDScript 包装器应可解析并实例化")
+	var namespace_method_count: int = 0
+	var namespace_methods: Array[String] = [
+		"set_value",
+		"get_value",
+		"remove_value",
+		"clear_namespace",
+		"corrupt_value_for_testing",
+	]
+	for method: Dictionary in ClassDB.class_get_method_list("SecureStorage", true):
+		if method["name"] not in namespace_methods:
+			continue
+		namespace_method_count += 1
+		var arguments: Array = method["args"]
+		context.check(not arguments.is_empty(), "命名空间方法应至少有一个参数")
+		if not arguments.is_empty():
+			context.check(arguments[0]["name"] == "storage_namespace", "命名空间入参应避免 GDScript 保留字")
+	context.check(namespace_method_count == namespace_methods.size(), "应覆盖所有暴露命名空间入参的方法")
+	context.end_case()
 
 	context.begin_case("错误名称覆盖")
 	var expected_names: Array[String] = [
