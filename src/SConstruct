@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+
+import filecmp
+import os
+import shutil
+
+
+project_dir = Dir("#").abspath
+# Consume project-only arguments before loading godot-cpp's SConstruct so its
+# unknown-variable check only sees options that belong to godot-cpp.
+godot_cpp_dir = os.path.abspath(ARGUMENTS.pop("godot_cpp_dir", os.path.join(project_dir, ".deps", "godot-cpp")))
+build_dir = os.path.abspath(ARGUMENTS.pop("build_dir", os.path.join(project_dir, "build")))
+sconsign_file = ARGUMENTS.pop("sconsign_file", "")
+if sconsign_file:
+    SConsignFile(os.path.abspath(sconsign_file))
+native_dir = os.path.join(project_dir, "native")
+addon_source_dir = os.path.join(project_dir, "addon")
+addon_dir = os.path.join(project_dir, "addons", "SecureStorage")
+addon_files = [
+    "plugin.cfg",
+    "plugin.gd",
+    "export_plugin.gd",
+    "storage_service.gd",
+    "secure_storage.gdextension",
+    "icon.svg",
+]
+
+os.makedirs(addon_dir, exist_ok=True)
+for addon_file in addon_files:
+    source_path = os.path.join(addon_source_dir, addon_file)
+    target_path = os.path.join(addon_dir, addon_file)
+    if not os.path.isfile(target_path) or not filecmp.cmp(source_path, target_path, shallow=False):
+        shutil.copy2(source_path, target_path)
+
+if not os.path.isdir(godot_cpp_dir):
+    print("缺少 godot-cpp，请先运行 scripts/bootstrap.sh。")
+    Exit(1)
+
+local_env = Environment(tools=["default"], PLATFORM="")
+env = SConscript(os.path.join(godot_cpp_dir, "SConstruct"), {"env": local_env})
+env = env.Clone()
+platform = env["platform"]
+variant_dir = os.path.join(build_dir, "obj", "{}-{}-{}".format(platform, env["target"], env["arch"]))
+env.VariantDir(variant_dir, native_dir, duplicate=0)
+env.Append(CPPPATH=[native_dir])
+
+sources = [os.path.join(variant_dir, "secure_storage.cpp")]
+if platform == "macos":
+    sources.append(os.path.join(variant_dir, "macos.cpp"))
+    env.Append(LINKFLAGS=["-framework", "Security", "-framework", "CoreFoundation"])
+elif platform == "ios":
+    sources.append(os.path.join(variant_dir, "ios.cpp"))
+    env.Append(LINKFLAGS=["-framework", "Security", "-framework", "CoreFoundation"])
+elif platform == "windows":
+    sources.append(os.path.join(variant_dir, "windows.cpp"))
+    env.Append(LIBS=["crypt32", "bcrypt"])
+elif platform == "linux":
+    sources.append(os.path.join(variant_dir, "linux.cpp"))
+    env.ParseConfig("pkg-config --cflags libsecret-1")
+    env.Append(LIBS=["dl"])
+elif platform == "android":
+    sources.append(os.path.join(variant_dir, "android.cpp"))
+
+if platform == "macos":
+    target_path = os.path.join(
+        addon_dir,
+        "bin/macos/libsecure_storage.macos.{}.framework/libsecure_storage.macos.{}".format(env["target"], env["target"]),
+    )
+    library = env.SharedLibrary(target_path, source=sources)
+elif platform == "ios":
+    simulator_suffix = ".simulator" if env["ios_simulator"] else ""
+    target_path = os.path.join(build_dir, "ios/libsecure_storage.ios.{}{}.a".format(env["target"], simulator_suffix))
+    library = env.StaticLibrary(target_path, source=sources)
+else:
+    suffix = env["suffix"].replace(".dev", "")
+    filename = "{}secure_storage{}{}".format(env.subst("$SHLIBPREFIX"), suffix, env.subst("$SHLIBSUFFIX"))
+    target_path = os.path.join(addon_dir, "bin", platform, filename)
+    library = env.SharedLibrary(target_path, source=sources)
+
+env.NoCache(library)
+Default(library)
