@@ -60,6 +60,7 @@ SecureStorage/
 │   └── test_runner.tscn
 ├── .gitignore
 ├── AGENTS.md
+├── LICENSE
 └── README.md
 ```
 
@@ -67,6 +68,7 @@ SecureStorage/
 
 - `.gitignore`：默认屏蔽所有路径，再逐项放行仓库认可的源码、配置、文档和测试文件，避免意外提交生成物。
 - `AGENTS.md`：向代码代理和自动化 harness 提供仓库白名单、生成物边界、验证入口及平台约束。
+- `LICENSE`：Apache License 2.0 官方许可文本。
 - `README.md`：说明项目用途、逐文件用途、构建方法、构建后布局和安全模型。
 - `.github/workflows/build.yml`：在 macOS、Windows、Ubuntu runner 上构建五个平台的 debug/release 产物，在三个桌面 runner 上验证
   Keychain、DPAPI、Secret Service 真实后端，汇总验证后打包 ZIP 并生成 SHA-256；推送与 `plugin.cfg` 版本一致的
@@ -80,7 +82,7 @@ SecureStorage/
 ### 构建与验证脚本
 
 - `scripts/bootstrap.sh`：校验 Godot 4.7.1 与 SCons 4.10.1，获取固定提交的 godot-cpp，并导出匹配版本的 GDExtension API 描述。
-- `scripts/build.sh`：把源码暂存到外部工作目录，调用对应平台工具链，并把可安装文件合并到 `addons/SecureStorage/`。
+- `scripts/build.sh`：把源码暂存到外部工作目录，调用对应平台工具链，并把可安装文件与许可证合并到 `addons/SecureStorage/`。
 - `scripts/clean.sh`：删除根目录生成的 addon 与外部工作目录，保留可复用的依赖、对象和签名缓存；传入 `--all` 时删除整个外部构建根目录。
 - `scripts/test.sh`：先构建当前桌面平台的 debug 扩展，再通过 Godot headless 运行内存后端或真实平台后端测试，并检查日志是否泄密或报错。
 - `scripts/verify.sh`：检查根路径白名单、固定脚本/文档集合、源码污染、GDScript 写法和 .NET 文件，再运行内存后端测试。
@@ -183,6 +185,7 @@ SecureStorage/
         │       └── secure_storage.windows.template_release.x86_64.dll
         ├── export_plugin.gd
         ├── icon.svg
+        ├── LICENSE
         ├── plugin.cfg
         ├── plugin.gd
         ├── secure_storage.gdextension
@@ -217,7 +220,7 @@ CI 为 Apple、Windows、Linux 分别维护依赖缓存与对象缓存。稳定�
 `scons-cache/` 与 `sconsign/` 缓存额外包含原生源码内容 hash。其中 `scons-cache/` 由 SCons 按构建输入的内容签名管理，跨 runner 恢复时不依赖对象文件的时间戳或签名库状态。源码变化时先按 restore key 恢复上一版缓存，只编译变化的输入。`work/` 每次重新组装，避免复用测试工程和打包暂存文件；`obj/` 内部继续按平台、目标和架构隔离。
 runner 镜像或任一固定构建输入变化时会使用新缓存，避免复用 ABI 不兼容的原生对象。
 
-完整 CI 包会在上述 addon 中再加入 `docs/api.md` 与 `docs/testing.md`，随后生成：
+完整 CI 包会在上述 addon 中再加入根目录的 `LICENSE`、`docs/api.md` 与 `docs/testing.md`，随后生成：
 
 ```text
 dist/
@@ -244,3 +247,7 @@ build，iOS 导出需要有效签名。
 ## 图标来源
 
 插件锁形图标来自 [Nieobie/game-icon-pack](https://github.com/Nieobie/game-icon-pack)，原项目以 CC0 1.0 Universal 发布。
+
+## 许可证
+
+SecureStorage 使用 [Apache License 2.0](LICENSE)。

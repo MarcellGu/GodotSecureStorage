@@ -157,6 +157,7 @@ case "$platform" in
         ;;
 esac
 
+cp "$project_dir/LICENSE" "$work_dir/addons/SecureStorage/LICENSE"
 mkdir -p "$project_dir/addons/SecureStorage"
 if [ "$platform" = macos ]; then
     final_framework="$project_dir/addons/SecureStorage/bin/macos/libsecure_storage.macos.$target.framework"

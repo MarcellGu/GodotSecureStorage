@@ -2,7 +2,7 @@
 set -eu
 
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-for required_root in .gitignore .github AGENTS.md README.md docs scripts src tests; do
+for required_root in .gitignore .github AGENTS.md LICENSE README.md docs scripts src tests; do
     if [ ! -e "$project_dir/$required_root" ]; then
         echo "缺少白名单根级路径：$required_root" >&2
         exit 1
@@ -11,7 +11,7 @@ done
 for root_entry in "$project_dir"/* "$project_dir"/.??*; do
     [ -e "$root_entry" ] || continue
     root_name=$(basename -- "$root_entry")
-    case "$root_name" in .git|.gitignore|.github|AGENTS.md|README.md|docs|scripts|src|tests) continue ;; esac
+    case "$root_name" in .git|.gitignore|.github|AGENTS.md|LICENSE|README.md|docs|scripts|src|tests) continue ;; esac
     if ! git -C "$project_dir" check-ignore -q -- "$root_entry"; then
         echo "发现既不在白名单中、也未被忽略的根级路径：$root_name" >&2
         exit 1

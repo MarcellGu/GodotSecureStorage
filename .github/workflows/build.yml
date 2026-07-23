@@ -434,6 +434,7 @@ jobs:
           done
           cp -R addons/SecureStorage/bin/. "$stage/bin/"
           cp -R docs "$stage/docs"
+          cp LICENSE "$stage/LICENSE"
 
           mkdir -p dist
           package_version="${GITHUB_SHA:0:12}"

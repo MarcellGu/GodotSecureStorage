@@ -11,6 +11,7 @@
 - `.gitignore`
 - `.github/`
 - `AGENTS.md`
+- `LICENSE`
 - `README.md`
 - `docs/`
 - `scripts/`
