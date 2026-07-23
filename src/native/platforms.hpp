@@ -6,6 +6,7 @@
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <Security/Security.h>
+#include <TargetConditionals.h>
 
 #include <cstdint>
 #include <cstring>
@@ -141,7 +142,9 @@ public:
 
 	BackendResult clear_namespace(const String &p_namespace) override {
 		ScopedCF<CFMutableDictionaryRef> query = base_query(p_namespace, nullptr);
+#if TARGET_OS_OSX
 		CFDictionarySetValue(query.get(), kSecMatchLimit, kSecMatchLimitAll);
+#endif
 		const OSStatus status = SecItemDelete(query.get());
 		return status == errSecSuccess || status == errSecItemNotFound ? BackendResult::success() :
 				status_failure(status, "清空命名空间");
