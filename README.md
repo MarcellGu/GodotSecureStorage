@@ -1,253 +1,251 @@
 # SecureStorage
 
-SecureStorage 是面向 Godot 4.7.1 的无 C# 依赖跨平台安全存储 GDExtension。
+SecureStorage 是面向 Godot 4.7.1 的跨平台同步安全存储插件。游戏代码只使用 GDScript `SecureStorage`；后端分别使用：
+
+- Windows：C++ 与 Credential Manager
+- Linux：C++ 与 Secret Service/libsecret
+- macOS、iOS：Objective-C++ 与 Keychain
+- Android：Kotlin、Keystore 与 `AtomicFile`
+
+项目不包含 C#/.NET。Android 是纯 Kotlin AAR，不使用 C++、JNI、NDK 或 CMake。当前发布基线为 `1.0.0`，唯一公开契约是
+[`docs/api.md`](docs/api.md) 中的 `StorageResult` 类型层级 API。
+
+## 安装
+
+发行 ZIP 使用 Godot 标准路径 `addons/SecureStorage/`。安装新版本前应完整删除项目中的旧目录，再解压新版本；不要把两个版本合并。
+启用插件后：
+
+- Android 需要安装 Gradle build template，并在导出预设中使用 Gradle Build。
+- iOS 由导出插件加入 Security、CoreFoundation 与 Foundation 链接参数。
+- Windows、Linux、macOS 由 `.gdextension` 根据平台和 debug/release 选择对应原生库。
+
+Apple 宿主还必须在 `project.godot` 中提供自身已获签名 entitlement 授权的完整 Keychain access group：
+
+```ini
+[secure_storage]
+
+apple_access_group="ABCDE12345.com.example.game"
+```
+
+该值属于宿主持久化身份，插件不提供默认值，也不会根据 bundle id 或插件身份猜测。macOS/iOS 缺少配置时，公开操作返回
+`StorageError.PLATFORM_ERROR`；配置存在但未被宿主 entitlement 授权时，Security.framework 返回完整平台诊断。
+
+仓库根目录的 `addon/` 是插件骨架和本地构建输出位置，不是最终 ZIP 的顶层路径。
 
 ## 项目结构
 
-以下列出仓库内每个受版本控制文件的实际作用。仓库协作约束集中写在 `AGENTS.md`，不在此重复。
-
 ```text
 SecureStorage/
-├── .github/
-│   └── workflows/
-│       └── build.yml
+├── addon/
+│   ├── export_plugin.gd
+│   ├── icon.svg
+│   ├── plugin.cfg
+│   ├── plugin.gd
+│   ├── secure_storage.gd
+│   ├── secure_storage.gdextension
+│   └── bin/                         # 构建生成，Git 忽略
+├── android/
+│   ├── plugin/
+│   │   ├── src/main/java/com/marcellgu/securestorage/AndroidBackend.kt
+│   │   ├── src/main/AndroidManifest.xml
+│   │   └── build.gradle.kts
+│   ├── gradle/wrapper/
+│   │   ├── gradle-wrapper.jar
+│   │   └── gradle-wrapper.properties
+│   ├── build.gradle.kts
+│   ├── gradle.properties
+│   ├── gradlew
+│   ├── gradlew.bat
+│   └── settings.gradle.kts
+├── src/
+│   ├── SConstruct
+│   ├── apple.mm
+│   ├── backend.hpp
+│   ├── extension.cpp
+│   ├── linux.cpp
+│   └── windows.cpp
+├── export_presets.cfg
+├── main.gd
+├── main.tscn
+├── project.godot
+├── scripts/
+│   ├── build_android.sh
+│   ├── build_apple.sh
+│   ├── build_linux.sh
+│   ├── build_windows.sh
+│   ├── android_adapter.sh
+│   ├── ios_adapter.sh
+│   ├── test_ios_pte.sh
+│   ├── linux_adapter.sh
+│   ├── macos_adapter.sh
+│   ├── test_macos_pte.sh
+│   ├── test.sh
+│   └── windows_adapter.sh
 ├── docs/
 │   ├── api.md
 │   └── testing.md
-├── scripts/
-│   ├── bootstrap.sh
-│   ├── build.sh
-│   ├── clean.sh
-│   ├── test.sh
-│   └── verify.sh
-├── src/
-│   ├── addon/
-│   │   ├── .gdignore
-│   │   ├── export_plugin.gd
-│   │   ├── icon.svg
-│   │   ├── plugin.cfg
-│   │   ├── plugin.gd
-│   │   ├── secure_storage.gdextension
-│   │   └── storage_service.gd
-│   ├── android/
-│   │   ├── plugin/
-│   │   │   ├── src/main/java/com/marcellgu/securestorage/
-│   │   │   │   └── SecureStoragePlugin.kt
-│   │   │   ├── src/main/AndroidManifest.xml
-│   │   │   ├── CMakeLists.txt
-│   │   │   └── build.gradle.kts
-│   │   ├── build.gradle.kts
-│   │   ├── gradle.properties
-│   │   ├── gradlew
-│   │   └── settings.gradle.kts
-│   ├── native/
-│   │   ├── android.cpp
-│   │   ├── ios.cpp
-│   │   ├── linux.cpp
-│   │   ├── macos.cpp
-│   │   ├── platforms.hpp
-│   │   ├── secure_storage.cpp
-│   │   ├── secure_storage.hpp
-│   │   └── windows.cpp
-│   ├── SConstruct
-│   └── project.godot
-├── tests/
-│   ├── memory_backend_test.gd
-│   ├── platform_backend_test.gd
-│   ├── storage_contract_test.gd
-│   ├── test_context.gd
-│   ├── test_runner.gd
-│   └── test_runner.tscn
-├── .gitignore
-├── AGENTS.md
-├── LICENSE
-└── README.md
+└── .github/
+    ├── actions/
+    │   ├── build-android/action.yml
+    │   ├── build-apple/action.yml
+    │   ├── build-linux/action.yml
+    │   ├── build-windows/action.yml
+    │   ├── e2e-android/action.yml
+    │   ├── e2e-ios/action.yml
+    │   ├── e2e-linux/action.yml
+    │   ├── e2e-macos/action.yml
+    │   └── e2e-windows/action.yml
+    ├── scripts/
+    │   ├── extract-candidate.sh
+    │   ├── invalidate-cache.sh
+    │   ├── setup-android-emulator.sh
+    │   ├── setup-android-sdk.sh
+    │   ├── setup-ci.sh
+    │   ├── setup-godot-cpp.sh
+    │   ├── setup-godot-linux.sh
+    │   ├── setup-godot-macos.sh
+    │   ├── setup-godot-windows.sh
+    │   ├── setup-godot-templates-linux.sh
+    │   ├── setup-godot-templates-macos.sh
+    │   ├── setup-godot-templates-windows.sh
+    │   ├── setup-ios-simulator.sh
+    │   ├── setup-linux-build.sh
+    │   ├── setup-linux-e2e.sh
+    │   ├── setup-scons-linux.sh
+    │   ├── setup-scons-macos.sh
+    │   └── setup-scons-windows.sh
+    └── workflows/build.yml
 ```
 
-### 根目录与自动化
+边界只有三条：
 
-- `.gitignore`：默认屏蔽所有路径，再逐项放行仓库认可的源码、配置、文档和测试文件，避免意外提交生成物。
-- `AGENTS.md`：向代码代理和自动化 harness 提供仓库白名单、生成物边界、验证入口及平台约束。
-- `LICENSE`：Apache License 2.0 官方许可文本。
-- `README.md`：说明项目用途、逐文件用途、构建方法、构建后布局和安全模型。
-- `.github/workflows/build.yml`：在 macOS、Windows、Ubuntu runner 上构建五个平台的 debug/release 产物，在三个桌面 runner 上验证
-  Keychain、DPAPI、Secret Service 真实后端，汇总验证后打包 ZIP 并生成 SHA-256；推送与 `plugin.cfg` 版本一致的
-  `v<major>.<minor>.<patch>` tag 时自动发布 GitHub Release。
-
-### 文档
-
-- `docs/api.md`：说明公开类、方法、参数边界、结果语义和稳定错误码，供接入方编写调用代码。
-- `docs/testing.md`：说明内存/真实后端测试命令、覆盖目标、平台测试范围和秘密泄漏哨兵。
-
-### 构建与验证脚本
-
-- `scripts/bootstrap.sh`：校验 Godot 4.7.1 与 SCons 4.10.1，获取固定提交的 godot-cpp，并导出匹配版本的 GDExtension API 描述。
-- `scripts/build.sh`：把源码暂存到外部工作目录，调用对应平台工具链，并把可安装文件与许可证合并到 `addons/SecureStorage/`。
-- `scripts/clean.sh`：删除根目录生成的 addon 与外部工作目录，保留可复用的依赖、对象和签名缓存；传入 `--all` 时删除整个外部构建根目录。
-- `scripts/test.sh`：先构建当前桌面平台的 debug 扩展，再通过 Godot headless 运行内存后端或真实平台后端测试，并检查日志是否泄密或报错。
-- `scripts/verify.sh`：检查根路径白名单、固定脚本/文档集合、源码污染、GDScript 写法和 .NET 文件，再运行内存后端测试。
-
-### Godot addon 文件
-
-- `src/addon/.gdignore`：阻止 Godot 编辑器把 addon 源目录作为普通项目内容导入；构建复制 addon 时不会携带此文件。
-- `src/addon/export_plugin.gd`：在 Android 导出时选择 debug/release AAR，在 iOS 导出时补充 Security 与 CoreFoundation
-  链接参数。
-- `src/addon/icon.svg`：给 Godot 编辑器中的 `SecureStorage` 类型提供锁形图标。
-- `src/addon/plugin.cfg`：向 Godot 注册插件名称、版本、说明和入口脚本。
-- `src/addon/plugin.gd`：在插件启用/停用时注册或注销导出插件。
-- `src/addon/secure_storage.gdextension`：把平台、构建类型和架构映射到对应原生库，并声明 iOS 依赖与 Android AAR 模式。
-- `src/addon/storage_service.gd`：给游戏逻辑提供严格类型的统一 GDScript 包装，把调用转发给原生 `SecureStorage`。
-
-### 公共原生实现与平台后端
-
-- `src/native/secure_storage.hpp`：规定错误码、操作结果、后端协议和暴露给 Godot 的存储对象接口。
-- `src/native/secure_storage.cpp`：完成参数校验、结果转换、内存测试后端、Godot 方法绑定和 GDExtension 初始化。
-- `src/native/platforms.hpp`：声明平台后端创建入口，并复用 Apple Keychain 查询、结果映射及敏感字节清理逻辑。
-- `src/native/windows.cpp`：通过当前用户 DPAPI 加解密数据，并以原子替换文件实现 Windows 的读写、删除和命名空间清理。
-- `src/native/macos.cpp`：选择 macOS Keychain 的本机可用 accessibility 策略并创建 Apple 后端。
-- `src/native/ios.cpp`：选择 iOS `AfterFirstUnlockThisDeviceOnly` accessibility 策略并创建 Apple 后端。
-- `src/native/linux.cpp`：运行时加载 libsecret/Secret Service，完成 Linux 密钥存取并把服务或动态库故障映射为统一错误。
-- `src/native/android.cpp`：通过 Godot 单例调用 Kotlin 插件，把 Android 操作结果转换为统一原生后端结果。
-
-### Android Plugin v2 工程
-
-- `src/android/build.gradle.kts`：固定 Android Gradle Plugin 与 Kotlin 插件版本，供子模块统一使用。
-- `src/android/settings.gradle.kts`：配置插件仓库、依赖仓库和 `plugin` 子模块。
-- `src/android/gradle.properties`：限定 Gradle JVM 内存、编码、AndroidX、SDK 下载策略和 Kotlin 风格。
-- `src/android/gradlew`：用仓库约定的 Gradle Wrapper 启动 Android 构建。
-- `src/android/plugin/build.gradle.kts`：配置 SDK/NDK、arm64 ABI、JDK/Kotlin 17、Godot 依赖和 CMake，并把 GDExtension 配置装入
-  AAR。
-- `src/android/plugin/CMakeLists.txt`：把公共原生实现与 Android 桥接编译为 `libsecure_storage.so`，并链接预构建 godot-cpp。
-- `src/android/plugin/src/main/AndroidManifest.xml`：通过 Godot Plugin v2 元数据声明 Android 插件初始化类。
-- `src/android/plugin/src/main/java/com/marcellgu/securestorage/SecureStoragePlugin.kt`：用 Android Keystore AES-256-GCM
-  与 `AtomicFile` 实现存取、删除、清空和错误状态传递，并向 Godot 暴露调用方法。
-
-### 构建入口与测试项目
-
-- `src/SConstruct`：选择目标平台源码与系统库，复制 addon 公共文件，并把 C++ 编译结果放进平台对应的 `bin/` 路径。
-- `src/project.godot`：组装构建工作区内的最小 Godot 测试项目，启用插件并把测试场景设为启动场景。
-- `tests/test_context.gd`：累计 suite、case、断言与失败数量，输出不含秘密值的结构化测试结果。
-- `tests/test_runner.gd`：默认调度内存后端契约，在收到 `--real` 时追加真实平台测试，并用退出码报告结果。
-- `tests/test_runner.tscn`：让 Godot 启动后实例化测试调度脚本。
-- `tests/storage_contract_test.gd`：复用同一组读写、空值、不存在、覆盖、幂等删除、隔离、清空和参数校验契约。
-- `tests/memory_backend_test.gd`：在确定性内存后端上执行统一契约，并补测参数边界、错误名称、损坏数据与后端不可用状态。
-- `tests/platform_backend_test.gd`：在当前系统安全存储上执行统一契约，并把数据限制在专用测试命名空间内。
+1. `src/` 与 `android/` 是平台实现源码。
+2. `addon/` 只跟踪六个插件结构文件；所有二进制由构建脚本注入 `addon/bin/`，且永不进入 Git。
+3. 根目录 Godot 项目是唯一测试实现。没有 `test/`、内存后端、平台内部测试、Android instrumentation 或另一套测试 harness。
 
 ## 构建
 
-构建需要 Godot 4.7.1、SCons 4.10.1 和 Git。依赖与中间产物默认放在系统临时目录的 `secure-storage-build/`，可通过
-`SECURE_STORAGE_BUILD_ROOT` 改变位置；仓库内的 `src/` 只读参与构建。
+依赖和中间产物默认位于 `${TMPDIR:-/tmp}/secure-storage-build/`，可用 `SECURE_STORAGE_BUILD_ROOT` 覆盖。四个入口均默认构建
+debug/release：
 
 ```sh
-./scripts/build.sh macos template_debug arm64
-./scripts/build.sh ios template_release arm64
-./scripts/build.sh linux template_debug x86_64
-./scripts/build.sh windows template_release x86_64
-./scripts/build.sh android template_debug arm64
+./scripts/build_apple.sh
+./scripts/build_windows.sh
+./scripts/build_linux.sh
+./scripts/build_android.sh
 ```
 
-Android 额外需要 JDK 17、SDK 36、NDK `28.1.13356709` 和 CMake `3.22.1`；iOS/macOS 需要对应 Xcode SDK；Linux 需要
-libsecret 开发头文件；Windows 需要 Visual Studio C++ 工具链。
+`build_apple.sh` 同时生成 macOS universal 与 iOS device/simulator XCFramework。通用原生依赖为 Godot 4.7.1、SCons 4.10.1
+和固定提交的 godot-cpp。Android 需要 JDK 17、SDK 36、Build Tools `36.0.0`；Linux 构建和运行时需要 libsecret 0.19.0
+或更高版本；Windows 需要 Visual Studio C++ 工具链，产物运行基线为 Windows 10 / Windows Server 2016 或更高版本。
 
-`build.sh` 每次只构建一个平台/目标，并把结果合并到根目录的 `addons/SecureStorage/`。要得到完整插件，需要依次合并五个平台的
-debug 与 release 构建；CI 会自动完成这一步。构建完成后运行 `./scripts/clean.sh` 清理 addon 和工作目录；如需同时清理依赖与对象缓存，运行
-`./scripts/clean.sh --all`。
+公开方法是同步调用。Linux 的 libsecret 同步 API 可能无限等待服务或用户提示，游戏代码必须从工作线程调用，不能阻塞 Godot
+主线程或其他 UI 线程。
 
-macOS framework 会生成 `Resources/Info.plist`；插件版本必须以 `major.minor.patch` 三段数字开头，可追加以 `-` 或 `.` 开头的后缀，
-framework 版本字段只与其三段数字核心同步。产物保留不含开发者身份的 ad-hoc 签名，确保 Apple Silicon 上的 Godot 编辑器能够直接加载。
-最终应用导出时会使用应用自己的签名身份覆盖该签名；构建会拒绝缺少关键 bundle 元数据、完全未签名或意外带有开发者身份的 framework。
-
-## 构建后结构
-
-本地构建会出现两个生成区域：仓库根目录只保留可安装 addon，依赖、对象文件、测试工程和各工具链中间产物留在外部构建根目录。
+输出为：
 
 ```text
-SecureStorage/
-└── addons/
-    └── SecureStorage/
-        ├── bin/
-        │   ├── android/
-        │   │   ├── debug/SecureStorage-debug.aar
-        │   │   └── release/SecureStorage-release.aar
-        │   ├── ios/
-        │   │   ├── libgodot-cpp.ios.template_debug.xcframework/
-        │   │   ├── libgodot-cpp.ios.template_release.xcframework/
-        │   │   ├── libsecure_storage.ios.template_debug.xcframework/
-        │   │   └── libsecure_storage.ios.template_release.xcframework/
-        │   ├── linux/
-        │   │   ├── libsecure_storage.linux.template_debug.x86_64.so
-        │   │   └── libsecure_storage.linux.template_release.x86_64.so
-        │   ├── macos/
-        │   │   ├── libsecure_storage.macos.template_debug.framework/
-        │   │   └── libsecure_storage.macos.template_release.framework/
-        │   └── windows/
-        │       ├── secure_storage.windows.template_debug.x86_64.dll
-        │       └── secure_storage.windows.template_release.x86_64.dll
-        ├── export_plugin.gd
-        ├── icon.svg
-        ├── LICENSE
-        ├── plugin.cfg
-        ├── plugin.gd
-        ├── secure_storage.gdextension
-        └── storage_service.gd
+addon/bin/
+├── android/{debug,release}/SecureStorage-*.aar
+├── ios/*.xcframework/
+├── linux/*.so
+├── macos/*.framework/
+└── windows/*.dll
 ```
 
-外部构建根目录默认位于 `${TMPDIR:-/tmp}/secure-storage-build/`：
+Android 构建使用仓库跟踪的 Gradle 官方 Wrapper。构建脚本不生成或修改测试项目，也不会把依赖、对象文件或 Gradle build
+目录写入源码树。
+
+## E2E
+
+先构建对应平台，再运行：
+
+```sh
+SECURE_STORAGE_APPLE_ACCESS_GROUP=ABCDE12345.com.example.game ./scripts/test.sh macos
+SECURE_STORAGE_APPLE_ACCESS_GROUP=ABCDE12345.com.example.game ./scripts/test.sh ios
+./scripts/test.sh windows
+./scripts/test.sh linux
+./scripts/test.sh android
+```
+
+公共 `test.sh` 把根目录 Godot 宿主和 `${SECURE_STORAGE_ADDON_DIR:-addon}` 的完整候选插件递归复制到外部临时工程；E2E stage
+会先调用公共解包脚本验证并解包候选，再通过 `SECURE_STORAGE_ADDON_DIR` 传递该候选目录。公共驱动统一执行候选结构校验、
+完整 staging、debug/release 与 WRITE/READ 循环和终态判定；五个平台 adapter 不选择性复制候选子目录，只处理对应平台的
+导出、安装、启动、日志与进程生命周期。驱动分别导出并启动 debug/release
+`TestSecureStorage`。每个变体启动两次：第一次只通过公开 GDScript API 写入真实后端并退出，第二次在新进程中读取相同数据，
+再执行覆盖、空值、domain 隔离、删除与清空。每次公开调用都会输出实际结果，并以 release 也会执行的控制流断言成功结果的
+`domain/key/value` 或错误结果的 `ErrorType` 与非空 `message`；任何不匹配立即输出 `ASSERTION_FAILED` 和 `FAIL` 并退出。
+终态同时报告运行时的 `DEBUG`/`RELEASE` feature。这使 CI 日志能直接展示
+跨进程持久化以及实际运行的导出变体，而不只是证明单进程内缓存或调用了某个导出命令。
+
+桌面平台从 stdout 读取终态，Android 使用 PID 限定的 Logcat，iOS 使用进程与 subsystem 限定的 Simulator unified log。每个
+公开 API 调用都会把固定的非生产测试值及实际 `domain/key/value` 或 `type/message` 完整写入 CI 日志。iOS 在看到终态后由脚本
+终止宿主应用，因为 UIKit 不允许普通应用自行结束进程。完整执行方式和设备边界见 [`docs/testing.md`](docs/testing.md)。
+
+本机 Personal Team 签收使用独立入口，不改变 CI 的 ad-hoc 行为：
+
+```sh
+./scripts/test_macos_pte.sh
+./scripts/test_ios_pte.sh
+```
+
+脚本会在终端询问环境中缺失的完整 Apple Keychain access group；也可以继续用
+`SECURE_STORAGE_APPLE_ACCESS_GROUP=ABCDE12345.com.example.game` 预先提供。默认 `godot` 命令或仓库 `addon/` 不可用时，
+脚本会继续询问对应路径；非交互终端缺少这些配置时直接失败。
+
+两个入口都生成已经装入当前候选的 debug/release Xcode 项目并打开 Xcode。iOS 使用 Godot 原生导出的 Xcode 工程；macOS
+先导出 `.app`，再生成只负责把该导出物组装为 Xcode target、请求 Personal Team provisioning profile 并签名运行的临时宿主。
+在 Xcode 中确认与 access group 前缀一致的 Team，iOS 选择真机、macOS 选择 My Mac 后运行，控制台必须输出唯一 `PASS` 终态。
+PTE 工程全部位于外部构建目录，不进入候选包，也不由 CI 调用。
+
+GitHub 托管 runner 使用 ad-hoc Apple 宿主。CI 只额外接受首个真实探针返回
+`StorageError.PLATFORM_ERROR` 且完整诊断包含 `(-34018)` 的统一错误结果：
+`result=ERROR error_type=3 message=<完整平台诊断>`。其他 Apple 故障仍然使 E2E 失败。本机 Personal Team 宿主的完整 `PASS`
+用于签收 Data Protection Keychain 实际能力。macOS 接受预期错误时还要求进程按宿主约定返回状态 `1`，崩溃信号或其他非零状态
+仍然失败。
+
+## CI 与发布
+
+CI 只允许以下数据流：
 
 ```text
-secure-storage-build/
-├── deps/
-│   ├── godot-cpp/
-│   └── extension_api_4.7.1.json
-├── gradle-home/
-├── obj/
-│   └── <platform>-<target>-<arch>/
-├── scons-cache/
-├── sconsign/
-└── work/
-    └── <platform>-<target>-<arch>/
-        ├── .deps/
-        ├── addon/
-        ├── android/
-        ├── native/
-        ├── tests/
-        ├── addons/SecureStorage/
-        ├── project.godot
-        └── SConstruct
+preflight
+    -> build_apple | build_windows | build_linux | build_android
+    -> assemble_addon
+    -> e2e_macos | e2e_ios | e2e_windows | e2e_linux | e2e_android
+    -> ci_complete
+    -> tag release
 ```
 
-CI 为 Apple、Windows、Linux 分别维护依赖缓存与对象缓存。稳定的 `deps/` 缓存按 runner 镜像和固定工具链输入失效；`obj/`、
-`scons-cache/` 与 `sconsign/` 缓存额外包含原生源码内容 hash。其中 `scons-cache/` 由 SCons 按构建输入的内容签名管理，跨 runner 恢复时不依赖对象文件的时间戳或签名库状态。源码变化时先按 restore key 恢复上一版缓存，只编译变化的输入。`work/` 每次重新组装，避免复用测试工程和打包暂存文件；`obj/` 内部继续按平台、目标和架构隔离。
-runner 镜像或任一固定构建输入变化时会使用新缓存，避免复用 ABI 不兼容的原生对象。
+`push` 只对 `main` 与 `v*` tag 运行完整流程，分支评审由 `pull_request` 覆盖，避免同仓库 PR 的同一提交重复执行。只有
+`README.md`、`LICENSE`、`docs/**` 变化时，`preflight` 验证仓库契约后由 `ci_complete` 确认所有平台任务均按计划跳过；
+其他路径、无法分类的变更、tag 与手动运行都 fail closed 到完整流程。
 
-完整 CI 包会在上述 addon 中再加入根目录的 `LICENSE`、`docs/api.md` 与 `docs/testing.md`，随后生成：
+汇总任务在全新目录中精确复制六个已跟踪插件文件和五个平台产物，以固定时间戳、排序路径和固定压缩参数只生成一次确定性候选
+ZIP。五个平台
+E2E 下载并运行同一个候选，不调用 build 脚本；Apple job 可报告完整 `PASS`，也可报告同时通过错误类型与 message
+断言的预期平台错误；其余门禁保持完整 `PASS`。Release 只原样提升已经通过全部门禁的 ZIP 与校验文件。
 
-```text
-dist/
-├── SecureStorage-<版本或commit前12位>.zip
-└── SecureStorage-<版本或commit前12位>.zip.sha256
-```
+`build.yml` 保留任务编排与轻量门禁；四个 `build_*` 和五个 `e2e_*` 可见复杂 stage 在 checkout 后调用对应的独立 Action。
+这些 stage Action 直接组合固定的 `actions/cache`、`actions/setup-java`、emulator runner、Artifact 传递、约定 build 脚本、
+公共 `test.sh`、对应平台 adapter 以及公共 `.github/scripts/extract-candidate.sh`。Godot、godot-cpp、SCons、Linux、JDK/Android SDK、iOS Simulator 与
+Android API 24 Emulator 的下载、安装、环境准备和恢复后校验分别由独立 `.github/scripts/setup-*.sh` 实现；Godot editor、
+export templates 与 SCons 按 macOS、Windows、Linux 使用不同脚本。跨运行缓存只能由 GitHub
+`actions/cache` 完成，因此缓存 restore/save 及固定 key 直接保留在对应的 `build-*` 或 `e2e-*` Action 中。缓存 key 不使用
+人工 schema epoch；恢复后的内容校验失败时删除对应远端条目，后续仍以同一身份 key 重建。
 
-普通 push、pull request 和手动运行使用 commit 前 12 位作为包版本。正式发布前更新 `src/addon/plugin.cfg` 中的 `version`，提交后推送
-同版本 tag（例如 `v1.0.0`）；CI 会重新构建并验证全部平台，使用 `1.0.0` 作为包版本，然后创建带自动生成说明的 GitHub Release。
-tag 版本与插件版本不一致时，打包任务会失败且不会发布。
+固定常量直接写在实际使用位置，不通过自定义变量或常量层间接提供；运行时数据与 GitHub、runner 和 shell 内建变量不受此限制，
+`SCONSFLAGS`、`GH_TOKEN`、`GH_REPO` 是明确例外。依赖下载 URL 与 SHA-256 不接受配置输入，也不动态拼接。Godot editor 与
+export templates 缓存经过固定 SHA-256 的原始归档，恢复后仍重新校验；原生构建只缓存 SCons 内容寻址目录，Android 只缓存外部
+Gradle 依赖/Wrapper 和测试前生成的干净 AVD snapshot。
 
-安装时把 ZIP 中的 `addons/SecureStorage/` 合并到 Godot 工程根目录，并在项目设置中启用插件。Android 导出需要 Gradle
-build，iOS 导出需要有效签名。
+`preflight` 运行固定版本且校验下载 SHA-256 的 ShellCheck 和 actionlint，覆盖 workflow、复合 Action metadata 与所有约定
+shell 脚本。所有外部 Action 均固定到完整 commit SHA。
 
-## 安全模型
-
-- Windows 使用当前用户 DPAPI；密文以原子替换方式保存。
-- macOS/iOS 使用 Security.framework Keychain；iOS accessibility 为 `AfterFirstUnlockThisDeviceOnly`。
-- Android 使用不可导出的 Android Keystore AES-256 密钥与 AES-GCM，并用 `AtomicFile` 持久化。
-- Linux 运行时使用 Secret Service/libsecret；服务不可用时返回 `UNAVAILABLE`。
-
-插件只识别自己的新格式，不读取、迁移或删除旧版安全存储数据。它防止普通明文落盘，但不防御已控制进程、能读取进程内存或已解锁当前用户会话的攻击者。
-
-## 图标来源
-
-插件锁形图标来自 [Nieobie/game-icon-pack](https://github.com/Nieobie/game-icon-pack)，原项目以 CC0 1.0 Universal 发布。
+`.gitignore` 采用 deny-all 白名单。即使本地 `addon/bin/` 有旧产物，汇总任务也不会递归复制整个 `addon/`，从而避免隐藏文件或
+陈旧二进制混入发行包。
 
 ## 许可证
 
-SecureStorage 使用 [Apache License 2.0](LICENSE)。
+SecureStorage 使用 [Apache License 2.0](LICENSE)。锁形图标来自
+[Nieobie/game-icon-pack](https://github.com/Nieobie/game-icon-pack)，以 CC0 1.0 Universal 发布。

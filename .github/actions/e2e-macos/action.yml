@@ -1,0 +1,69 @@
+name: E2E macOS
+description: Export and run the macOS black-box test against the candidate.
+
+runs:
+  using: composite
+  steps:
+    - name: Download candidate
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      with:
+        name: secure-storage-candidate
+        path: ${{ runner.temp }}/candidate
+
+    - name: Install candidate
+      shell: bash
+      run: ./.github/scripts/extract-candidate.sh
+
+    - name: Cache Godot
+      id: godot-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-editor-archive
+        key: godot-editor-macos-4.7.1-stable
+
+    - name: Install Godot
+      id: godot_setup
+      shell: bash
+      env:
+        CACHE_KEY: godot-editor-macos-4.7.1-stable
+        CACHE_HIT: ${{ steps.godot-cache.outputs.cache-hit }}
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: ./.github/scripts/setup-godot-macos.sh
+
+    - name: Save repaired Godot cache
+      if: steps.godot_setup.outputs.cache_invalidated == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-editor-archive
+        key: godot-editor-macos-4.7.1-stable
+
+    - name: Cache Godot export templates
+      id: templates-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-export-templates
+        key: godot-export-templates-4.7.1-stable
+        enableCrossOsArchive: true
+
+    - name: Install Godot export templates
+      id: templates_setup
+      shell: bash
+      env:
+        CACHE_KEY: godot-export-templates-4.7.1-stable
+        CACHE_HIT: ${{ steps.templates-cache.outputs.cache-hit }}
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: ./.github/scripts/setup-godot-templates-macos.sh
+
+    - name: Save repaired Godot export templates cache
+      if: steps.templates_setup.outputs.cache_invalidated == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-export-templates
+        key: godot-export-templates-4.7.1-stable
+        enableCrossOsArchive: true
+
+    - name: Run macOS E2E
+      shell: bash
+      run: ./scripts/test.sh macos

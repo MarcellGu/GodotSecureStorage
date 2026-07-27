@@ -1,0 +1,100 @@
+name: Build Apple
+description: Build and upload the macOS and iOS module artifacts.
+
+runs:
+  using: composite
+  steps:
+    - name: Restore SCons cache
+      id: scons-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ runner.temp }}/secure-storage-build/scons-cache
+          ${{ runner.temp }}/scons-4.10.1-py3-none-any.whl
+        key: secure-storage-scons-4.10.1-macos
+
+    - name: Install SCons
+      id: scons_setup
+      shell: bash
+      env:
+        CACHE_KEY: secure-storage-scons-4.10.1-macos
+        CACHE_HIT: ${{ steps.scons-cache.outputs.cache-hit }}
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: ./.github/scripts/setup-scons-macos.sh
+
+    - name: Cache Godot
+      id: godot-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-editor-archive
+        key: godot-editor-macos-4.7.1-stable
+
+    - name: Install Godot
+      id: godot_setup
+      shell: bash
+      env:
+        CACHE_KEY: godot-editor-macos-4.7.1-stable
+        CACHE_HIT: ${{ steps.godot-cache.outputs.cache-hit }}
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: ./.github/scripts/setup-godot-macos.sh
+
+    - name: Save repaired Godot cache
+      if: steps.godot_setup.outputs.cache_invalidated == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-editor-archive
+        key: godot-editor-macos-4.7.1-stable
+
+    - name: Restore godot-cpp
+      id: godot-cpp-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/secure-storage-build/deps/godot-cpp
+        key: godot-cpp-ba0edfed90512ec64aba51d4295a3e7e30112f86
+        enableCrossOsArchive: true
+
+    - name: Install and verify godot-cpp
+      id: godot_cpp_setup
+      shell: bash
+      env:
+        CACHE_KEY: godot-cpp-ba0edfed90512ec64aba51d4295a3e7e30112f86
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: ./.github/scripts/setup-godot-cpp.sh "${{ steps.godot-cpp-cache.outputs.cache-hit }}"
+
+    - name: Save godot-cpp
+      if: steps.godot-cpp-cache.outputs.cache-hit != 'true' || steps.godot_cpp_setup.outputs.cache_invalidated == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/secure-storage-build/deps/godot-cpp
+        key: godot-cpp-ba0edfed90512ec64aba51d4295a3e7e30112f86
+        enableCrossOsArchive: true
+
+    - name: Build Apple modules
+      shell: bash
+      env:
+        SCONSFLAGS: --jobs=3
+      run: ./scripts/build_apple.sh
+
+    - name: Replace SCons cache
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: ./.github/scripts/invalidate-cache.sh secure-storage-scons-4.10.1-macos current-ref
+
+    - name: Save updated SCons cache
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ runner.temp }}/secure-storage-build/scons-cache
+          ${{ runner.temp }}/scons-4.10.1-py3-none-any.whl
+        key: secure-storage-scons-4.10.1-macos
+
+    - name: Upload Apple modules
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      with:
+        name: secure-storage-module-apple
+        path: addon/bin

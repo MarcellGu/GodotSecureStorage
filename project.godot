@@ -1,0 +1,38 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="TestSecureStorage"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+run/flush_stdout_on_print=true
+config/icon="res://addon/icon.svg"
+
+[display]
+
+window/size/viewport_width=320
+window/size/viewport_height=180
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addon/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+shader_compiler/shader_cache/enabled.android=false
+textures/vram_compression/import_s3tc_bptc=true
+textures/vram_compression/import_etc2_astc=true
+
+[secure_storage]
+
+apple_access_group="__SECURE_STORAGE_APPLE_ACCESS_GROUP__"

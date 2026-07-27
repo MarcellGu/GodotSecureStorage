@@ -1,81 +1,206 @@
 #!/usr/bin/env python3
 
-import filecmp
 import os
-import shutil
 
 
-project_dir = Dir("#").abspath
-# Consume project-only arguments before loading godot-cpp's SConstruct so its
-# unknown-variable check only sees options that belong to godot-cpp.
-godot_cpp_dir = os.path.abspath(ARGUMENTS.pop("godot_cpp_dir", os.path.join(project_dir, ".deps", "godot-cpp")))
-build_dir = os.path.abspath(ARGUMENTS.pop("build_dir", os.path.join(project_dir, "build")))
-sconsign_file = ARGUMENTS.pop("sconsign_file", "")
-if sconsign_file:
-    SConsignFile(os.path.abspath(sconsign_file))
-native_dir = os.path.join(project_dir, "native")
-addon_source_dir = os.path.join(project_dir, "addon")
-addon_dir = os.path.join(project_dir, "addons", "SecureStorage")
-addon_files = [
-    "plugin.cfg",
-    "plugin.gd",
-    "export_plugin.gd",
-    "storage_service.gd",
-    "secure_storage.gdextension",
-    "icon.svg",
-]
+# 平台脚本先把六个已跟踪源码文件复制到仓库外的短路径工作目录，再从该目录
+# 调用 SCons，因此 `Dir("#")` 指向这份一次性源码快照。后续路径校验统一使用
+# `realpath`，以便先解析 `..` 与符号链接，再判断生成物是否会落回真实仓库。
+source_dir = os.path.realpath(Dir("#").abspath)
 
-os.makedirs(addon_dir, exist_ok=True)
-for addon_file in addon_files:
-    source_path = os.path.join(addon_source_dir, addon_file)
-    target_path = os.path.join(addon_dir, addon_file)
-    if not os.path.isfile(target_path) or not filecmp.cmp(source_path, target_path, shallow=False):
-        shutil.copy2(source_path, target_path)
+# 下列参数属于本项目，而不是 godot-cpp。必须在加载 godot-cpp 的
+# SConstruct 前从全局 ARGUMENTS 中取出，否则 godot-cpp 会把它们报告为未知
+# 变量。平台、架构、target、custom_api_file 等 godot-cpp 参数则保留在
+# ARGUMENTS 中，交给依赖自己的 Variables 定义完成解析和校验。
+#
+# 四条路径必须由平台构建脚本显式传入。本文件只描述原生库的编译与链接：
+# 不下载依赖、不复制 addon，也不把依赖、对象文件或最终二进制写回源码目录。
+godot_cpp_argument = ARGUMENTS.pop("godot_cpp_dir", "")
+build_argument = ARGUMENTS.pop("build_dir", "")
+output_argument = ARGUMENTS.pop("output_dir", "")
+sconsign_argument = ARGUMENTS.pop("sconsign_file", "")
+repository_argument = ARGUMENTS.pop("repository_dir", "")
 
-if not os.path.isdir(godot_cpp_dir):
-    print("缺少 godot-cpp，请先运行 scripts/bootstrap.sh。")
+# godot_cpp_dir 有意使用相对于短路径工作目录的 `godot-cpp`；其他路径必须是
+# 绝对路径，避免输出位置依赖调用者环境。repository_dir 指回真实仓库，用于
+# 维持边界校验。
+if not godot_cpp_argument:
+    print("godot_cpp_dir 必须由平台构建脚本传入。")
+    Exit(1)
+required_paths = {
+    "build_dir": build_argument,
+    "output_dir": output_argument,
+    "sconsign_file": sconsign_argument,
+    "repository_dir": repository_argument,
+}
+for argument_name, argument_value in required_paths.items():
+    if not argument_value or not os.path.isabs(argument_value):
+        print("{} 必须是平台构建脚本传入的绝对路径。".format(argument_name))
+        Exit(1)
+
+# 校验原始参数后再规范化路径。godot_cpp_dir 相对于源码快照解析，但加载
+# SConscript 时仍保留短词法路径，避免静态归档命令重新展开成长绝对路径。
+godot_cpp_dir = os.path.realpath(os.path.join(source_dir, godot_cpp_argument))
+build_dir = os.path.realpath(build_argument)
+output_dir = os.path.realpath(output_argument)
+sconsign_file = os.path.realpath(sconsign_argument)
+repository_dir = os.path.realpath(repository_argument)
+
+# 依赖、对象文件、最终产物和 SCons 签名数据库都必须位于仓库外。
+# `commonpath` 按路径组件比较，而不是按字符串前缀比较，因此不会误把
+# `/path/SecureStorage-other` 当成 `/path/SecureStorage` 的子目录。
+for argument_name, argument_value in {
+    "godot_cpp_dir": godot_cpp_dir,
+    "build_dir": build_dir,
+    "output_dir": output_dir,
+    "sconsign_file": sconsign_file,
+}.items():
+    try:
+        inside_repository = (
+            os.path.commonpath([repository_dir, argument_value]) == repository_dir
+        )
+    except ValueError:
+        inside_repository = False
+    if inside_repository:
+        print("{} 解析后不得位于仓库内：{}".format(argument_name, argument_value))
+        Exit(1)
+
+# 这里只验证已经由平台脚本准备好的依赖，不在 SCons 配置阶段执行网络访问。
+# 检查入口文件比只检查目录更早暴露空目录或错误 checkout。
+if not os.path.isfile(os.path.join(godot_cpp_dir, "SConstruct")):
+    print("godot_cpp_dir 不包含可用的 godot-cpp SConstruct。")
     Exit(1)
 
+# 所有路径都通过边界检查后才创建目录，避免无效参数在仓库内留下部分生成物。
+os.makedirs(build_dir, exist_ok=True)
+os.makedirs(output_dir, exist_ok=True)
+os.makedirs(os.path.dirname(sconsign_file), exist_ok=True)
+
+# 每个构建维度使用平台脚本提供的独立签名数据库。这样 debug/release、架构和
+# device/simulator 的增量状态不会共享默认的 `src/.sconsign.dblite`。
+SConsignFile(sconsign_file)
+
+# godot-cpp 的 SConstruct 支持导入一个基础环境，并通过 Return("env") 返回已
+# 配置的平台工具链、编译选项、文件后缀和 libgodot-cpp 链接依赖。先取得这个
+# 环境再 Clone，既复用其公开集成方式，也避免下面 Append 的项目选项反向修改
+# 依赖自身持有的 env。
 local_env = Environment(tools=["default"], PLATFORM="")
-env = SConscript(os.path.join(godot_cpp_dir, "SConstruct"), {"env": local_env})
+env = SConscript(os.path.join(godot_cpp_argument, "SConstruct"), {"env": local_env})
 env = env.Clone()
 platform = env["platform"]
-variant_dir = os.path.join(build_dir, "obj", "{}-{}-{}".format(platform, env["target"], env["arch"]))
-env.VariantDir(variant_dir, native_dir, duplicate=0)
-env.Append(CPPPATH=[native_dir])
 
-sources = [os.path.join(variant_dir, "secure_storage.cpp")]
+# 原生 GDExtension 只有这四个平台实现。Android 由独立的纯 Kotlin AAR
+# 工程构建，绝不能通过此入口意外引入 NDK、JNI 或 Android GDExtension。
+if platform not in ("macos", "ios", "windows", "linux"):
+    print("SConstruct 只支持 Apple、Windows 与 Linux；Android 必须使用纯 Kotlin AAR。")
+    Exit(1)
+
+# 平台脚本传入的 build_dir 已按一次构建调用隔离；这里再把实际对象目录编码为
+# platform/target/arch，确保将来同一 build_dir 被复用时仍不会发生对象碰撞。
+variant_dir = os.path.join(
+    build_dir,
+    "obj-{}-{}-{}".format(platform, env["target"], env["arch"]),
+)
+
+# duplicate=0 让变体目录中的 Node 引用 `src/` 原文件，不复制源码。编译产生的
+# 对象仍写入仓库外的 variant_dir，头文件搜索则显式指回公共源码目录。
+env.VariantDir(variant_dir, source_dir, duplicate=0)
+env.Append(CPPPATH=[source_dir])
+
+# 公共 extension.cpp 定义 Godot 暴露的类型与扩展入口；每个平台只追加一个
+# 后端实现，避免把其他平台 API、头文件或链接依赖带入当前二进制。
+sources = [os.path.join(variant_dir, "extension.cpp")]
+
 if platform == "macos":
-    sources.append(os.path.join(variant_dir, "macos.cpp"))
-    env.Append(LINKFLAGS=["-framework", "Security", "-framework", "CoreFoundation"])
+    sources.append(os.path.join(variant_dir, "apple.mm"))
+    # apple.mm 使用 Security 的 Keychain API、CoreFoundation 所有权 API 和
+    # Foundation 的 NSString/NSData/NSDictionary Objective-C++ 桥接类型。
+    env.Append(
+        LINKFLAGS=[
+            "-framework",
+            "Security",
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "Foundation",
+        ]
+    )
 elif platform == "ios":
-    sources.append(os.path.join(variant_dir, "ios.cpp"))
-    env.Append(LINKFLAGS=["-framework", "Security", "-framework", "CoreFoundation"])
+    sources.append(os.path.join(variant_dir, "apple.mm"))
+    # iOS 与 macOS 共享同一 Keychain 后端及相同的系统 framework 依赖。
+    env.Append(
+        LINKFLAGS=[
+            "-framework",
+            "Security",
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "Foundation",
+        ]
+    )
 elif platform == "windows":
     sources.append(os.path.join(variant_dir, "windows.cpp"))
-    env.Append(LIBS=["crypt32", "bcrypt"])
+    # Windows 10 / Server 2016 是公开运行基线。两个宏同时设置，确保 Windows
+    # SDK 头文件暴露一致的 API 表面；advapi32 提供 Credential Manager 的
+    # CredReadW、CredWriteW、CredDeleteW 与 CredEnumerateW。
+    env.Append(
+        CPPDEFINES=[
+            ("_WIN32_WINNT", "0x0A00"),
+            ("WINVER", "0x0A00"),
+        ]
+    )
+    env.Append(LIBS=["advapi32"])
 elif platform == "linux":
     sources.append(os.path.join(variant_dir, "linux.cpp"))
-    env.ParseConfig("pkg-config --cflags libsecret-1")
-    env.Append(LIBS=["dl"])
-elif platform == "android":
-    sources.append(os.path.join(variant_dir, "android.cpp"))
+    # 让 pkg-config 同时注入编译参数和传递依赖，不手工猜测不同发行版中的
+    # include/lib 路径；版本表达式在配置阶段即拒绝过旧的 libsecret。
+    env.ParseConfig("pkg-config --cflags --libs 'libsecret-1 >= 0.19.0'")
 
 if platform == "macos":
+    # SCons 只把 Mach-O 动态库写入 staging framework。build_apple.sh 随后
+    # 生成 Info.plist、执行 ad-hoc 签名并验证 framework，因此这里不能直接把
+    # 未完成的目录复制进 addon。
+    framework_name = "libsecure_storage.macos.{}".format(env["target"])
+
+    # install name 必须与最终 framework 的目录名和可执行文件名完全一致，
+    # 使 Godot/宿主在嵌入 framework 后可以通过 @rpath 正确加载。
+    env.Append(
+        LINKFLAGS=[
+            "-Wl,-install_name,@rpath/{0}.framework/{0}".format(framework_name)
+        ]
+    )
     target_path = os.path.join(
-        addon_dir,
-        "bin/macos/libsecure_storage.macos.{}.framework/libsecure_storage.macos.{}".format(env["target"], env["target"]),
+        output_dir,
+        "{}.framework".format(framework_name),
+        framework_name,
     )
     library = env.SharedLibrary(target_path, source=sources)
 elif platform == "ios":
+    # iOS 先分别生成 device 与 simulator 静态库。模拟器后缀用于防止两种
+    # slice 在 staging 中同名；build_apple.sh 随后用 xcodebuild 将它们组合
+    # 为同一个 XCFramework，并另外打包对应的 libgodot-cpp XCFramework。
     simulator_suffix = ".simulator" if env["ios_simulator"] else ""
-    target_path = os.path.join(build_dir, "ios/libsecure_storage.ios.{}{}.a".format(env["target"], simulator_suffix))
+    target_path = os.path.join(
+        output_dir,
+        "libsecure_storage.ios.{}{}.a".format(env["target"], simulator_suffix),
+    )
     library = env.StaticLibrary(target_path, source=sources)
 else:
+    # Windows/Linux 使用 godot-cpp 已解析的平台前缀、后缀、target 与架构，
+    # 从而与其 ABI 配置保持一致。公开发行文件名不包含 godot-cpp 的 `.dev`
+    # 标记；官方平台脚本只构建 template_debug/template_release 且不启用
+    # dev_build，因此产物名能与 secure_storage.gdextension 精确对应。
     suffix = env["suffix"].replace(".dev", "")
-    filename = "{}secure_storage{}{}".format(env.subst("$SHLIBPREFIX"), suffix, env.subst("$SHLIBSUFFIX"))
-    target_path = os.path.join(addon_dir, "bin", platform, filename)
+    filename = "{}secure_storage{}{}".format(
+        env.subst("$SHLIBPREFIX"),
+        suffix,
+        env.subst("$SHLIBSUFFIX"),
+    )
+    target_path = os.path.join(output_dir, filename)
     library = env.SharedLibrary(target_path, source=sources)
 
+# 最终库依赖签名、framework/XCFramework 组装和平台 staging 状态，不应直接从
+# SCons Cache 恢复；对象文件仍由外部 SCONS_CACHE 按编译签名安全复用。
+# Default 明确把本项目库加入 godot-cpp 已注册的默认目标集合。
 env.NoCache(library)
 Default(library)

@@ -1,0 +1,25 @@
+[configuration]
+
+entry_symbol = "secure_storage_library_init"
+compatibility_minimum = "4.7"
+reloadable = false
+
+[libraries]
+
+macos.debug = "./bin/macos/libsecure_storage.macos.template_debug.framework"
+macos.release = "./bin/macos/libsecure_storage.macos.template_release.framework"
+windows.debug.x86_64 = "./bin/windows/secure_storage.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "./bin/windows/secure_storage.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "./bin/linux/libsecure_storage.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "./bin/linux/libsecure_storage.linux.template_release.x86_64.so"
+ios.debug = "./bin/ios/libsecure_storage.ios.template_debug.xcframework"
+ios.release = "./bin/ios/libsecure_storage.ios.template_release.xcframework"
+
+[dependencies]
+
+ios.debug = {
+    "./bin/ios/libgodot-cpp.ios.template_debug.xcframework": ""
+}
+ios.release = {
+    "./bin/ios/libgodot-cpp.ios.template_release.xcframework": ""
+}

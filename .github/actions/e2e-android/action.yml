@@ -1,0 +1,153 @@
+name: E2E Android
+description: Export and run the Android black-box test against the candidate.
+
+runs:
+  using: composite
+  steps:
+    - name: Download candidate
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      with:
+        name: secure-storage-candidate
+        path: ${{ runner.temp }}/candidate
+
+    - name: Install candidate
+      shell: bash
+      run: ./.github/scripts/extract-candidate.sh
+
+    - name: Install Linux host dependencies
+      shell: bash
+      run: ./.github/scripts/setup-linux-e2e.sh
+
+    - name: Set up JDK
+      uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+      with:
+        distribution: temurin
+        java-version: "17"
+
+    - name: Cache Gradle
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ runner.temp }}/secure-storage-build/gradle-home/caches
+          ${{ runner.temp }}/secure-storage-build/gradle-home/wrapper
+        key: secure-storage-gradle-8.14.3-jdk17-linux
+
+    - name: Install Android SDK
+      shell: bash
+      run: ./.github/scripts/setup-android-sdk.sh
+
+    - name: Cache Godot
+      id: godot-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-editor-archive
+        key: godot-editor-linux-4.7.1-stable
+
+    - name: Install Godot
+      id: godot_setup
+      shell: bash
+      env:
+        CACHE_KEY: godot-editor-linux-4.7.1-stable
+        CACHE_HIT: ${{ steps.godot-cache.outputs.cache-hit }}
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: ./.github/scripts/setup-godot-linux.sh
+
+    - name: Save repaired Godot cache
+      if: steps.godot_setup.outputs.cache_invalidated == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-editor-archive
+        key: godot-editor-linux-4.7.1-stable
+
+    - name: Cache Godot export templates
+      id: templates-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-export-templates
+        key: godot-export-templates-4.7.1-stable
+        enableCrossOsArchive: true
+
+    - name: Install Godot export templates
+      id: templates_setup
+      shell: bash
+      env:
+        CACHE_KEY: godot-export-templates-4.7.1-stable
+        CACHE_HIT: ${{ steps.templates-cache.outputs.cache-hit }}
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: ./.github/scripts/setup-godot-templates-linux.sh
+
+    - name: Save repaired Godot export templates cache
+      if: steps.templates_setup.outputs.cache_invalidated == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/godot-export-templates
+        key: godot-export-templates-4.7.1-stable
+        enableCrossOsArchive: true
+
+    - name: Restore Android emulator cache
+      id: avd-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.android/avd/*
+        key: secure-storage-avd-linux-api24-x86_64-pixel_2
+
+    - name: Validate restored Android emulator cache
+      id: avd-cache-validation
+      if: steps.avd-cache.outputs.cache-hit == 'true'
+      continue-on-error: true
+      shell: bash
+      run: ./.github/scripts/setup-android-emulator.sh validate-cache
+
+    - name: Invalidate Android emulator cache
+      if: steps.avd-cache-validation.outcome == 'failure'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        ./.github/scripts/invalidate-cache.sh secure-storage-avd-linux-api24-x86_64-pixel_2
+        ./.github/scripts/setup-android-emulator.sh clear-cache
+
+    - name: Prepare Android emulator host
+      shell: bash
+      run: ./.github/scripts/setup-android-emulator.sh prepare-host
+
+    - name: Create Android emulator
+      if: steps.avd-cache.outputs.cache-hit != 'true' || steps.avd-cache-validation.outcome == 'failure'
+      uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+      with:
+        api-level: 24
+        arch: x86_64
+        profile: pixel_2
+        force-avd-creation: false
+        emulator-options: >-
+          -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          -camera-back none
+        disable-animations: false
+        script: ./.github/scripts/setup-android-emulator.sh validate-device
+
+    - name: Validate Android emulator cache
+      shell: bash
+      run: ./.github/scripts/setup-android-emulator.sh validate-cache
+
+    - name: Save Android emulator cache
+      if: github.event_name != 'pull_request' && (steps.avd-cache.outputs.cache-hit != 'true' || steps.avd-cache-validation.outcome == 'failure')
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.android/avd/*
+        key: secure-storage-avd-linux-api24-x86_64-pixel_2
+
+    - name: Run Android E2E
+      uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+      with:
+        api-level: 24
+        arch: x86_64
+        profile: pixel_2
+        force-avd-creation: false
+        emulator-options: >-
+          -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio
+          -no-boot-anim -camera-back none
+        disable-animations: true
+        script: ./scripts/test.sh android
